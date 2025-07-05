@@ -59,9 +59,13 @@ const outputHTML = ({ provider = 'unknown', token, error, errorCode, targetOrigi
  * @returns {Promise<Response>} HTTP response.
  */
 const handleAuth = async (request, env) => {
-  const { url } = request;
+  const { url, headers } = request;
   const { origin, searchParams } = new URL(url);
   const { provider, site_id: domain } = Object.fromEntries(searchParams);
+  
+  // Get the referring domain from the Referer header
+  const referer = headers.get('Referer');
+  const referringOrigin = referer ? new URL(referer).origin : null;
 
   if (!provider || !supportedProviders.includes(provider)) {
     return outputHTML({
