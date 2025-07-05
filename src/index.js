@@ -18,9 +18,10 @@ const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * @param {string} [args.error] - Error message when an OAuth token is not available.
  * @param {string} [args.errorCode] - Error code to be used to localize the error message in
  * Sveltia CMS.
+ * @param {string} [args.targetOrigin] - The origin to send the postMessage to.
  * @returns {Response} Response with HTML.
  */
-const outputHTML = ({ provider = 'unknown', token, error, errorCode }) => {
+const outputHTML = ({ provider = 'unknown', token, error, errorCode, targetOrigin }) => {
   const state = error ? 'error' : 'success';
   const content = error ? { provider, error, errorCode } : { provider, token };
 
@@ -28,15 +29,16 @@ const outputHTML = ({ provider = 'unknown', token, error, errorCode }) => {
     `
       <!doctype html><html><body><script>
         (() => {
+          const targetOrigin = '${targetOrigin || '*'}';
           window.addEventListener('message', ({ data, origin }) => {
             if (data === 'authorizing:${provider}') {
               window.opener?.postMessage(
                 'authorization:${provider}:${state}:${JSON.stringify(content)}',
-                origin
+                targetOrigin === '*' ? origin : targetOrigin
               );
             }
           });
-          window.opener?.postMessage('authorizing:${provider}', '*');
+          window.opener?.postMessage('authorizing:${provider}', targetOrigin);
         })();
       </script></body></html>
     `,
