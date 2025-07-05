@@ -195,11 +195,24 @@ const handleCallback = async (request, env) => {
     });
   }
 
-  if (!csrfToken || state !== csrfToken) {
+  // Decode the state to get CSRF token and original domain
+  let stateData;
+  let originalOrigin = origin;
+  
+  try {
+    stateData = JSON.parse(atob(state));
+    originalOrigin = stateData.origin || origin;
+  } catch {
+    // Fallback to old behavior if state is not base64 JSON
+    stateData = { csrf: state };
+  }
+
+  if (!csrfToken || stateData.csrf !== csrfToken) {
     return outputHTML({
       provider,
       error: 'Potential CSRF attack detected. Authentication flow aborted.',
       errorCode: 'CSRF_DETECTED',
+      targetOrigin: originalOrigin,
     });
   }
 
@@ -222,6 +235,7 @@ const handleCallback = async (request, env) => {
         provider,
         error: 'OAuth app client ID or secret is not configured.',
         errorCode: 'MISCONFIGURED_CLIENT',
+        targetOrigin: originalOrigin,
       });
     }
 
@@ -239,6 +253,7 @@ const handleCallback = async (request, env) => {
         provider,
         error: 'OAuth app client ID or secret is not configured.',
         errorCode: 'MISCONFIGURED_CLIENT',
+        targetOrigin: originalOrigin,
       });
     }
 
@@ -274,6 +289,7 @@ const handleCallback = async (request, env) => {
       provider,
       error: 'Failed to request an access token. Please try again later.',
       errorCode: 'TOKEN_REQUEST_FAILED',
+      targetOrigin: originalOrigin,
     });
   }
 
@@ -284,10 +300,11 @@ const handleCallback = async (request, env) => {
       provider,
       error: 'Server responded with malformed data. Please try again later.',
       errorCode: 'MALFORMED_RESPONSE',
+      targetOrigin: originalOrigin,
     });
   }
 
-  return outputHTML({ provider, token, error });
+  return outputHTML({ provider, token, error, targetOrigin: originalOrigin });
 };
 
 export default {
