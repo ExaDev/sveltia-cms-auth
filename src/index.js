@@ -102,6 +102,13 @@ const handleAuth = async (request, env) => {
   // Generate a random string for CSRF protection
   const csrfToken = globalThis.crypto.randomUUID().replaceAll('-', '');
   let authURL = '';
+  
+  // Create state parameter that includes both CSRF token and original domain
+  const stateData = {
+    csrf: csrfToken,
+    origin: referringOrigin || origin
+  };
+  const state = btoa(JSON.stringify(stateData));
 
   // GitHub
   if (provider === 'github') {
@@ -116,7 +123,7 @@ const handleAuth = async (request, env) => {
     const params = new URLSearchParams({
       client_id: GITHUB_CLIENT_ID,
       scope: 'repo,user',
-      state: csrfToken,
+      state: state,
     });
 
     authURL = `https://${GITHUB_HOSTNAME}/login/oauth/authorize?${params.toString()}`;
@@ -137,7 +144,7 @@ const handleAuth = async (request, env) => {
       redirect_uri: `${origin}/callback`,
       response_type: 'code',
       scope: 'api',
-      state: csrfToken,
+      state: state,
     });
 
     authURL = `https://${GITLAB_HOSTNAME}/oauth/authorize?${params.toString()}`;
