@@ -117,6 +117,7 @@ const handleAuth = async (request, env) => {
         provider,
         error: 'OAuth app client ID or secret is not configured.',
         errorCode: 'MISCONFIGURED_CLIENT',
+        targetOrigin: referringOrigin || origin,
       });
     }
 
@@ -136,6 +137,7 @@ const handleAuth = async (request, env) => {
         provider,
         error: 'OAuth app client ID or secret is not configured.',
         errorCode: 'MISCONFIGURED_CLIENT',
+        targetOrigin: referringOrigin || origin,
       });
     }
 
