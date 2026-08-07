@@ -18,9 +18,10 @@ const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  * @param {string} [args.error] - Error message when an OAuth token is not available.
  * @param {string} [args.errorCode] - Error code to be used to localize the error message in
  * Sveltia CMS.
+ * @param {string} [args.targetOrigin] - The origin to send the postMessage to.
  * @returns {Response} Response with HTML.
  */
-const outputHTML = ({ provider = 'unknown', token, error, errorCode }) => {
+const outputHTML = ({ provider = 'unknown', token, error, errorCode, targetOrigin }) => {
   const state = error ? 'error' : 'success';
   const content = error ? { provider, error, errorCode } : { provider, token };
 
@@ -28,15 +29,16 @@ const outputHTML = ({ provider = 'unknown', token, error, errorCode }) => {
     `
       <!doctype html><html><body><script>
         (() => {
+          const targetOrigin = '${targetOrigin || '*'}';
           window.addEventListener('message', ({ data, origin }) => {
             if (data === 'authorizing:${provider}') {
               window.opener?.postMessage(
                 'authorization:${provider}:${state}:${JSON.stringify(content)}',
-                origin
+                targetOrigin === '*' ? origin : targetOrigin
               );
             }
           });
-          window.opener?.postMessage('authorizing:${provider}', '*');
+          window.opener?.postMessage('authorizing:${provider}', targetOrigin);
         })();
       </script></body></html>
     `,
@@ -57,9 +59,13 @@ const outputHTML = ({ provider = 'unknown', token, error, errorCode }) => {
  * @returns {Promise<Response>} HTTP response.
  */
 const handleAuth = async (request, env) => {
-  const { url } = request;
+  const { url, headers } = request;
   const { origin, searchParams } = new URL(url);
   const { provider, site_id: domain } = Object.fromEntries(searchParams);
+  
+  // Get the referring domain from the Referer header
+  const referer = headers.get('Referer');
+  const referringOrigin = referer ? new URL(referer).origin : null;
 
   if (!provider || !supportedProviders.includes(provider)) {
     return outputHTML({
@@ -96,6 +102,13 @@ const handleAuth = async (request, env) => {
   // Generate a random string for CSRF protection
   const csrfToken = globalThis.crypto.randomUUID().replaceAll('-', '');
   let authURL = '';
+  
+  // Create state parameter that includes both CSRF token and original domain
+  const stateData = {
+    csrf: csrfToken,
+    origin: referringOrigin || origin
+  };
+  const state = btoa(JSON.stringify(stateData));
 
   // GitHub
   if (provider === 'github') {
@@ -104,13 +117,14 @@ const handleAuth = async (request, env) => {
         provider,
         error: 'OAuth app client ID or secret is not configured.',
         errorCode: 'MISCONFIGURED_CLIENT',
+        targetOrigin: referringOrigin || origin,
       });
     }
 
     const params = new URLSearchParams({
       client_id: GITHUB_CLIENT_ID,
       scope: 'repo,user',
-      state: csrfToken,
+      state: state,
     });
 
     authURL = `https://${GITHUB_HOSTNAME}/login/oauth/authorize?${params.toString()}`;
@@ -123,6 +137,7 @@ const handleAuth = async (request, env) => {
         provider,
         error: 'OAuth app client ID or secret is not configured.',
         errorCode: 'MISCONFIGURED_CLIENT',
+        targetOrigin: referringOrigin || origin,
       });
     }
 
@@ -131,7 +146,7 @@ const handleAuth = async (request, env) => {
       redirect_uri: `${origin}/callback`,
       response_type: 'code',
       scope: 'api',
-      state: csrfToken,
+      state: state,
     });
 
     authURL = `https://${GITLAB_HOSTNAME}/oauth/authorize?${params.toString()}`;
@@ -180,11 +195,24 @@ const handleCallback = async (request, env) => {
     });
   }
 
-  if (!csrfToken || state !== csrfToken) {
+  // Decode the state to get CSRF token and original domain
+  let stateData;
+  let originalOrigin = origin;
+  
+  try {
+    stateData = JSON.parse(atob(state));
+    originalOrigin = stateData.origin || origin;
+  } catch {
+    // Fallback to old behavior if state is not base64 JSON
+    stateData = { csrf: state };
+  }
+
+  if (!csrfToken || stateData.csrf !== csrfToken) {
     return outputHTML({
       provider,
       error: 'Potential CSRF attack detected. Authentication flow aborted.',
       errorCode: 'CSRF_DETECTED',
+      targetOrigin: originalOrigin,
     });
   }
 
@@ -207,6 +235,7 @@ const handleCallback = async (request, env) => {
         provider,
         error: 'OAuth app client ID or secret is not configured.',
         errorCode: 'MISCONFIGURED_CLIENT',
+        targetOrigin: originalOrigin,
       });
     }
 
@@ -224,6 +253,7 @@ const handleCallback = async (request, env) => {
         provider,
         error: 'OAuth app client ID or secret is not configured.',
         errorCode: 'MISCONFIGURED_CLIENT',
+        targetOrigin: originalOrigin,
       });
     }
 
@@ -259,6 +289,7 @@ const handleCallback = async (request, env) => {
       provider,
       error: 'Failed to request an access token. Please try again later.',
       errorCode: 'TOKEN_REQUEST_FAILED',
+      targetOrigin: originalOrigin,
     });
   }
 
@@ -269,10 +300,11 @@ const handleCallback = async (request, env) => {
       provider,
       error: 'Server responded with malformed data. Please try again later.',
       errorCode: 'MALFORMED_RESPONSE',
+      targetOrigin: originalOrigin,
     });
   }
 
-  return outputHTML({ provider, token, error });
+  return outputHTML({ provider, token, error, targetOrigin: originalOrigin });
 };
 
 export default {
